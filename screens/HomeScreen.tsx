@@ -6,308 +6,818 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ActivityIndicator,
+  Platform,
+  AppState,
+  ScrollView,
+  TextInput,
+  KeyboardAvoidingView,
 } from "react-native";
-import React, { useRef, useState } from "react";
-import { Audio } from "expo-av";
+import React, { useEffect, useRef, useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { scale, verticalScale } from "react-native-size-matters";
-import { AntDesign, FontAwesome } from "@expo/vector-icons";
+import AntDesign from "@expo/vector-icons/AntDesign";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { Audio } from "expo-av";
+import axios, { AxiosError } from "axios";
 import LottieView from "lottie-react-native";
-import axios from "axios";
+import * as Speech from "expo-speech";
+import * as FileSystem from "expo-file-system";
+
+// Make sure you have these SVG components
 import Regenerate from "@/assets/svgs/regenerate";
 import Reload from "@/assets/svgs/reload";
 
+const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_API_KEY;
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+
+// Audio recording configuration
+const RECORDING_OPTIONS = {
+  android: {
+    extension: ".wav",
+    outputFormat: Audio.AndroidOutputFormat.DEFAULT,
+    audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 128000,
+  },
+  ios: {
+    extension: ".wav",
+    outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+    audioQuality: Audio.IOSAudioQuality.HIGH,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 128000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+};
+
 export default function HomeScreen() {
-  const [AIResponse, setAIResponse] = useState(false);
-  const [AISpeaking, setAISpeaking] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [text, setText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording>();
+  const [AIResponse, setAIResponse] = useState(false);
+  const [AISpeaking, setAISpeaking] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const lottieRef = useRef<LottieView>(null);
+  const [availableVoices, setAvailableVoices] = useState([]);
+  const [userInput, setUserInput] = useState("");
+  const [chatHistory, setChatHistory] = useState<
+    Array<{ role: string; content: string }>
+  >([]);
 
-  // get microphone access
+  useEffect(() => {
+    validateApiKeys();
+  }, []);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRecording) {
+      interval = setInterval(async () => {
+        const status = await recording?.getStatusAsync();
+        setRecordingDuration(status?.durationMillis || 0);
+      }, 100);
+    }
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
+  useEffect(() => {
+    if (AISpeaking) {
+      lottieRef.current?.play();
+    } else {
+      lottieRef.current?.reset();
+    }
+  }, [AISpeaking]);
+
+  const validateApiKeys = () => {
+    if (!GOOGLE_API_KEY || !GEMINI_API_KEY) {
+      Alert.alert(
+        "Configuration Error",
+        "API keys are not properly configured. Please check your environment setup."
+      );
+    }
+  };
+
   const getMicrophonePermission = async () => {
     try {
+      console.log("Requesting microphone permission...");
       const { granted } = await Audio.requestPermissionsAsync();
+      console.log("Microphone permission granted:", granted);
 
       if (!granted) {
         Alert.alert(
-          "Permission",
-          "Please grant microphone permission to continue"
+          "Permission Required",
+          "Microphone access is required for voice recording"
         );
         return false;
       }
       return true;
-    } catch (err: any) {
-      console.log(err);
+    } catch (error) {
+      console.error("Error requesting microphone permission:", error);
+      Alert.alert("Error", "Failed to request microphone permission");
       return false;
     }
   };
 
-  const recordingOptions: any = {
-    android: {
-      extension: ".wav",
-      outPutFormat: Audio.AndroidOutputFormat.MPEG_4,
-      androidEncoder: Audio.AndroidAudioEncoder.AAC,
-      sampleRate: 44100,
-      numberOfChannels: 2,
-      bitRate: 128000,
-    },
-    ios: {
-      extension: ".wav",
-      audioQuality: Audio.IOSAudioQuality.HIGH,
-      sampleRate: 44100,
-      numberOfChannels: 2,
-      bitRate: 128000,
-      linearPCMBitDepth: 16,
-      linearPCMIsBigEndian: false,
-      linearPCMIsFloat: false,
-    },
-  };
-
   const startRecording = async () => {
     const hasPermission = await getMicrophonePermission();
-
     if (!hasPermission) return;
+
     try {
+      console.log("Starting recording...");
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
-      setIsRecording(true);
+      const newRecording = new Audio.Recording();
+      await newRecording.prepareToRecordAsync({
+        android: RECORDING_OPTIONS.android,
+        ios: RECORDING_OPTIONS.ios,
+        web: {},
+      });
 
-      const { recording } = await Audio.Recording.createAsync(recordingOptions);
-      setRecording(recording);
-    } catch (err: any) {
-      console.log("Failed to start Recording", err);
-      Alert.alert("Error", "Failed to start recording");
+      console.log("Recording prepared");
+      await newRecording.startAsync();
+      console.log("Recording started");
+
+      setRecording(newRecording);
+      setIsRecording(true);
+      setRecordingDuration(0);
+    } catch (error) {
+      console.error("Failed to start recording:", error);
+      Alert.alert(
+        "Recording Error",
+        "Failed to start recording. Please try again."
+      );
     }
   };
 
-  const stopRecording = async () => {
+  const validateAudioFile = async (uri: string) => {
     try {
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      console.log("Audio file validation:", {
+        exists: fileInfo.exists,
+        size: fileInfo.exists ? fileInfo.size : undefined,
+        uri: fileInfo.uri,
+      });
+
+      if (!fileInfo.exists) {
+        throw new Error("Audio file does not exist");
+      }
+
+      if (fileInfo.size === 0) {
+        throw new Error("Audio file is empty");
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Audio file validation error:", error);
+      return false;
+    }
+  };
+
+  const convertSpeechToText = async (uri: string): Promise<string> => {
+    try {
+      console.log("Reading audio file...");
+      const audioData = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      console.log("Audio file read, length:", audioData.length);
+
+      if (!audioData || audioData.length === 0) {
+        throw new Error("Audio file is empty");
+      }
+
+      const response = await axios.post(
+        `https://speech.googleapis.com/v1/speech:recognize?key=${GOOGLE_API_KEY}`,
+        {
+          config: {
+            encoding: "LINEAR16",
+            sampleRateHertz: 16000,
+            languageCode: "en-US",
+            model: "default",
+            audioChannelCount: 1,
+            enableAutomaticPunctuation: true,
+            useEnhanced: true,
+          },
+          audio: {
+            content: audioData,
+          },
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          timeout: 30000,
+        }
+      );
+
+      // console.log('API Response:', JSON.stringify(response.data, null, 2));
+
+      if (!response.data.results || response.data.results.length === 0) {
+        throw new Error(
+          "No speech detected. Please try speaking more clearly."
+        );
+      }
+
+      const transcript =
+        response.data.results[0]?.alternatives?.[0]?.transcript;
+      if (!transcript) {
+        throw new Error("Could not transcribe audio. Please try again.");
+      }
+
+      return transcript;
+    } catch (error) {
+      console.error("Speech to text error:", error);
+
+      if (error instanceof AxiosError) {
+        console.error("API Error Response:", error.response?.data);
+
+        if (error.response?.status === 400) {
+          throw new Error("Invalid audio format. Please try speaking again.");
+        } else if (error.response?.status === 401) {
+          throw new Error("API key error. Please check configuration.");
+        } else if (error.response?.status === 403) {
+          throw new Error("Speech-to-Text API not enabled.");
+        }
+      }
+      throw error;
+    }
+  };
+
+  const sendToGemini = async (text: string): Promise<string> => {
+    try {
+      if (!GEMINI_API_KEY) {
+        throw new Error("Gemini API key is not configured");
+      }
+
+      const updatedChatHistory = [
+        ...chatHistory,
+        { role: "user", content: text },
+      ];
+
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          contents: updatedChatHistory.map((msg) => ({
+            role: msg.role === "user" ? "USER" : "MODEL",
+            parts: [{ text: msg.content }],
+          })),
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_HARASSMENT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE",
+            },
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE",
+            },
+            {
+              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE",
+            },
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE",
+            },
+          ],
+          generationConfig: {
+            temperature: 0.9,
+            topK: 1,
+            topP: 1,
+            maxOutputTokens: 2048,
+            stopSequences: [],
+          },
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      // Properly handle the Gemini API response structure
+      if (
+        response.data.candidates &&
+        response.data.candidates[0]?.content?.parts?.[0]?.text
+      ) {
+        const aiResponse = response.data.candidates[0].content.parts[0].text;
+        setText(aiResponse);
+        setLoading(false);
+        setAIResponse(true);
+        await speakText(aiResponse);
+
+        setChatHistory([
+          ...updatedChatHistory,
+          { role: "assistant", content: aiResponse },
+        ]);
+
+        return aiResponse;
+      } else {
+        throw new Error("Invalid response format from Gemini API");
+      }
+    } catch (error) {
+      console.error("Gemini API error:", error);
+
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          throw new Error(
+            "API authentication failed. Please check your Gemini API key."
+          );
+        } else if (error.response?.status === 429) {
+          throw new Error("API rate limit exceeded. Please try again later.");
+        } else if (error.code === "ECONNABORTED") {
+          throw new Error(
+            "Request timed out. Please check your internet connection."
+          );
+        } else if (error.response?.status === 404) {
+          throw new Error(
+            "Invalid API endpoint. Please check the API configuration."
+          );
+        }
+
+        // Log detailed error information for debugging
+        console.error("Detailed API error:", {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          headers: error.response?.headers,
+        });
+      }
+
+      throw new Error("Failed to get AI response. Please try again.");
+    }
+  };
+
+  // Updated stopRecording function with better error handling and response processing
+  const stopRecording = async () => {
+    if (!recording) {
+      console.log("No recording to stop");
+      return;
+    }
+
+    try {
+      console.log("Stopping recording...");
       setIsRecording(false);
       setLoading(true);
 
-      await recording?.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-      });
+      await recording.stopAndUnloadAsync();
+      console.log("Recording stopped");
 
-      const uri = recording?.getURI();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
-      // send audio to whisper API for transcription
-      const transcript = await sendAudioToWhisper(uri!);
-      console.log("transcript", transcript);
-      setText(transcript);
-    } catch (err: any) {
-      console.log("Failed to stop Recording", err);
-      Alert.alert("Error", "Failed to stop recording");
+      const uri = recording.getURI();
+      if (!uri) {
+        throw new Error("No recording URI available");
+      }
+
+      console.log("Recording URI:", uri);
+
+      const isValid = await validateAudioFile(uri);
+      if (!isValid) {
+        throw new Error("Invalid audio recording");
+      }
+
+      const transcribedText = await convertSpeechToText(uri);
+      console.log("Transcribed text:", transcribedText);
+
+      if (!transcribedText.trim()) {
+        throw new Error(
+          "No speech detected. Please try speaking more clearly."
+        );
+      }
+
+      setText(transcribedText);
+
+      try {
+        console.log("Sending to Gemini:", transcribedText);
+        const aiResponse = await sendToGemini(transcribedText);
+
+        if (!aiResponse) {
+          throw new Error("Empty response from Gemini API");
+        }
+
+        console.log("Gemini response:", aiResponse);
+        setText(aiResponse);
+        setAIResponse(true);
+        await speakText(aiResponse);
+      } catch (aiError) {
+        console.error("AI response error:", aiError);
+        Alert.alert(
+          "AI Response Error",
+          aiError instanceof Error
+            ? aiError.message
+            : "Failed to get AI response. Please try again."
+        );
+        setText(transcribedText); // Keep the transcribed text visible
+      }
+    } catch (error) {
+      console.error("Processing error:", error);
+      Alert.alert(
+        "Processing Error",
+        error instanceof Error ? error.message : "An unexpected error occurred"
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const sendAudioToWhisper = async (uri: string) => {
-    let retries = 3;
-    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-  
-    while (retries > 0) {
-      try {
-        const formData = new FormData();
-        formData.append("file", {
-          uri,
-          type: "audio/wav",
-          name: "recording.wav",
-        } as any);
-        formData.append("model", "whisper-1");
-  
-        const response = await axios.post(
-          "https://api.openai.com/v1/audio/transcriptions",
-          formData,
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
-              "Content-Type": "multipart/form-data",
-            },
-          }
-        );
-        console.log(response.data.text);
-        return response.data.text; // return the transcript from the response
-      } catch (err: any) {
-        if (err.response?.status === 429) {
-          retries -= 1;
-          console.log(`Rate limited, retrying... (${3 - retries} of 3)`);
-          await delay(3000); // wait 3 seconds before retrying
-        } else {
-          console.log("Failed to send audio to Whisper", err);
-          Alert.alert("Error", "Failed to send audio to Whisper");
-          return;
-        }
-      }
-    }
-    Alert.alert("Error", "Exceeded maximum retry attempts due to rate limiting.");
+  // Add this type for better type safety
+  type GeminiResponse = {
+    candidates: Array<{
+      content: {
+        parts: Array<{
+          text: string;
+        }>;
+      };
+    }>;
   };
-  
+
+  useEffect(() => {
+    const loadVoices = async () => {
+      const voices = await Speech.getAvailableVoicesAsync();
+      setAvailableVoices(voices as any);
+      // console.log("Available voices:", voices);
+    };
+
+    loadVoices();
+
+    return () => {
+      // Cleanup speech when component unmounts
+      Speech.stop();
+    };
+  }, []);
+
+  // Add app state listener to handle speech cleanup
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "background" || nextAppState === "inactive") {
+        Speech.stop();
+        setAISpeaking(false);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  // Modified speakText function with male voice selection
+  const speakText = async (text: string) => {
+    try {
+      // Stop any ongoing speech first
+      await Speech.stop();
+
+      setAISpeaking(true);
+
+      // Select appropriate male voice based on platform
+      let voiceOptions = {
+        language: "en-US",
+        pitch: 1.0,
+        rate: 0.9,
+      };
+
+      // if (Platform.OS === "ios") {
+      //   // Use Daniel voice for iOS (male voice)
+      //   voiceOptions = {
+      //     ...voiceOptions,
+      //     voice: "com.apple.voice.compact.en-US.Samantha",
+      //   };
+      // } else {
+      //   // For Android, find a male voice
+      //   const maleVoice = availableVoices.find(
+      //     (voice: Speech.Voice) =>
+      //       voice.identifier.includes("male") || voice.name.includes("male")
+      //   );
+      //   if (maleVoice) {
+      //     voiceOptions = {
+      //       ...voiceOptions,
+      //       voice: maleVoice.identifier,
+      //     };
+      //   }
+      // }
+
+      await Speech.speak(text, {
+        ...voiceOptions,
+        onDone: () => {
+          setAISpeaking(false);
+        },
+        onError: (error) => {
+          console.error("Speech synthesis error:", error);
+          setAISpeaking(false);
+          Alert.alert("Error", "Failed to synthesize speech");
+        },
+      });
+    } catch (error) {
+      console.error("Speech error:", error);
+      setAISpeaking(false);
+      Alert.alert("Error", "Failed to initialize speech");
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (userInput.trim() === "") return;
+
+    setLoading(true);
+    try {
+      const aiResponse = await sendToGemini(userInput);
+      setText(aiResponse);
+      setAIResponse(true);
+      await speakText(aiResponse);
+    } catch (error) {
+      console.error("Error sending message:", error);
+      Alert.alert("Error", "Failed to get AI response. Please try again.");
+    } finally {
+      setLoading(false);
+      setUserInput("");
+    }
+  };
 
   return (
-    <LinearGradient
-      colors={["#250152", "#000"]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.container}
     >
-      <StatusBar barStyle={"light-content"} />
+      <LinearGradient
+        colors={["#250152", "#000"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.container}
+      >
+        <StatusBar barStyle={"light-content"} />
 
-      {/* Black shadows */}
-      <Image
-        source={require("@/assets/main/blur.png")}
-        style={{
-          position: "absolute",
-          right: scale(-15),
-          top: 0,
-          width: scale(240),
-        }}
-      />
-      <Image
-        source={require("@/assets/main/purple-blur.png")}
-        style={{
-          position: "absolute",
-          left: scale(-15),
-          bottom: verticalScale(100),
-          width: scale(210),
-        }}
-      />
+        <Image
+          source={require("@/assets/main/blur.png")}
+          style={styles.topBlur}
+        />
+        <Image
+          source={require("@/assets/main/purple-blur.png")}
+          style={styles.bottomBlur}
+        />
 
-      {/* Back arrow */}
-      {AIResponse && (
-        <TouchableOpacity
-          style={{
-            position: "absolute",
-            top: verticalScale(50),
-            left: scale(20),
-          }}
-          onPress={() => {
-            setAIResponse(false), setIsRecording(false), setText("");
-          }}
-        >
-          <AntDesign name="arrowleft" size={scale(20)} color="#fff" />
-        </TouchableOpacity>
-      )}
-
-      <View style={{ marginTop: verticalScale(-40) }}>
-        {loading ? (
-          <TouchableOpacity>
-            <LottieView
-              source={require("@/assets/animations/loading.json")}
-              autoPlay
-              loop
-              speed={1.3}
-              style={{ width: scale(270), height: scale(270) }}
-            />
+        {AIResponse && (
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              Speech.stop();
+              setIsRecording(false);
+              setAIResponse(false);
+              setText("");
+              setAISpeaking(false);
+              setChatHistory([]);
+            }}
+          >
+            <AntDesign name="arrowleft" size={scale(20)} color="#fff" />
           </TouchableOpacity>
-        ) : (
-          <>
-            {!isRecording ? (
+        )}
+
+        <View style={styles.contentContainer}>
+          <View style={styles.animationContainer}>
+            {loading ? (
+              <TouchableOpacity>
+                <LottieView
+                  source={require("@/assets/animations/loading.json")}
+                  autoPlay
+                  loop
+                  speed={1.3}
+                  style={styles.loadingAnimation}
+                />
+              </TouchableOpacity>
+            ) : (
               <>
-                {AIResponse ? (
-                  <View>
-                    <LottieView
-                      ref={lottieRef}
-                      source={require("@/assets/animations/ai-speaking.json")}
-                      autoPlay={false}
-                      loop={false}
-                      style={{ width: scale(250), height: scale(250) }}
-                    />
-                  </View>
+                {!isRecording ? (
+                  <>
+                    {AIResponse ? (
+                      <View>
+                        <LottieView
+                          ref={lottieRef}
+                          source={require("@/assets/animations/ai-speaking.json")}
+                          autoPlay={false}
+                          loop={false}
+                          style={styles.aiAnimation}
+                        />
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.micButton}
+                        onPress={startRecording}
+                      >
+                        <FontAwesome
+                          name="microphone"
+                          size={scale(50)}
+                          color="#2b3356"
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </>
                 ) : (
-                  <TouchableOpacity
-                    style={{
-                      width: scale(110),
-                      height: scale(110),
-                      backgroundColor: "#fff",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: scale(100),
-                    }}
-                    onPress={startRecording}
-                  >
-                    <FontAwesome
-                      name="microphone"
-                      size={scale(50)}
-                      color="#2b3356"
+                  <TouchableOpacity onPress={stopRecording}>
+                    <LottieView
+                      source={require("@/assets/animations/animation.json")}
+                      autoPlay
+                      loop
+                      speed={1.3}
+                      style={styles.recordingAnimation}
                     />
                   </TouchableOpacity>
                 )}
               </>
-            ) : (
-              <TouchableOpacity onPress={stopRecording}>
-                <LottieView
-                  source={require("@/assets/animations/animation.json")}
-                  autoPlay
-                  loop
-                  speed={1.3}
-                  style={{ width: scale(250), height: scale(250) }}
-                />
-              </TouchableOpacity>
             )}
-          </>
-        )}
-      </View>
+          </View>
 
-      <View
-        style={{
-          alignItems: "center",
-          width: scale(350),
-          position: "absolute",
-          bottom: verticalScale(90),
-        }}
-      >
-        <Text
-          style={{
-            color: "#fff",
-            fontSize: scale(16),
-            width: scale(269),
-            textAlign: "center",
-            lineHeight: 25,
-          }}
-        >
-          {"Press the microphone to start recording!"}
-        </Text>
-      </View>
+          <View style={styles.textContainer}>
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={styles.scrollViewContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {chatHistory.map((message, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.messageContainer,
+                    message.role === "user"
+                      ? styles.userMessage
+                      : styles.aiMessage,
+                  ]}
+                >
+                  <Text style={styles.messageText}>{message.content}</Text>
+                </View>
+              ))}
+              {loading && (
+                <Text style={styles.loadingText}>AI is thinking...</Text>
+              )}
+            </ScrollView>
+          </View>
 
-      {AIResponse && (
-        <View
-          style={{
-            position: "absolute",
-            bottom: verticalScale(40),
-            left: 0,
-            paddingHorizontal: scale(30),
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-            width: scale(360),
-          }}
-        >
-          <TouchableOpacity onPress={() => {}}>
-            <Regenerate />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => {}}>
-            <Reload />
-          </TouchableOpacity>
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              value={userInput}
+              onChangeText={setUserInput}
+              placeholder="Type your message..."
+              placeholderTextColor="#999"
+            />
+            <TouchableOpacity
+              style={styles.sendButton}
+              onPress={handleSendMessage}
+            >
+              <FontAwesome name="send" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          {AIResponse && (
+            <View style={styles.controlsContainer}>
+              <TouchableOpacity onPress={() => sendToGemini(text)}>
+                <Regenerate />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  Speech.stop();
+                  speakText(text);
+                }}
+              >
+                <Reload />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
-      )}
-    </LinearGradient>
+      </LinearGradient>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
     backgroundColor: "#131313",
+  },
+  topBlur: {
+    position: "absolute",
+    right: scale(-15),
+    top: 0,
+    width: scale(240),
+  },
+  bottomBlur: {
+    position: "absolute",
+    left: scale(-15),
+    bottom: verticalScale(100),
+    width: scale(210),
+  },
+  backButton: {
+    position: "absolute",
+    top: verticalScale(50),
+    left: scale(20),
+    zIndex: 1,
+  },
+  contentContainer: {
+    flex: 1,
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: verticalScale(100),
+    paddingBottom: verticalScale(30),
+  },
+  animationContainer: {
+    alignItems: "center",
+    marginTop: verticalScale(20),
+  },
+  loadingAnimation: {
+    width: scale(270),
+    height: scale(270),
+  },
+  aiAnimation: {
+    width: scale(250),
+    height: scale(250),
+  },
+  micButton: {
+    width: scale(110),
+    height: scale(110),
+    backgroundColor: "#fff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: scale(100),
+  },
+  recordingAnimation: {
+    width: scale(250),
+    height: scale(250),
+  },
+  textContainer: {
+    flex: 1,
+    width: "100%",
+    paddingHorizontal: scale(20),
+    marginTop: verticalScale(-30),
+  },
+  scrollView: {
+    flex: 1,
+    width: "100%",
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    // paddingVertical: verticalScale(10),
+  },
+  messageContainer: {
+    borderRadius: scale(15),
+    padding: scale(10),
+    marginBottom: verticalScale(10),
+    maxWidth: "80%",
+  },
+  userMessage: {
+    alignSelf: "flex-end",
+    backgroundColor: "#4a0e4e",
+  },
+  aiMessage: {
+    alignSelf: "flex-start",
+    backgroundColor: "#2b3356",
+  },
+  messageText: {
+    color: "#fff",
+    fontSize: scale(16),
+  },
+  loadingText: {
+    color: "#999",
+    fontSize: scale(14),
+    textAlign: "center",
+    marginTop: verticalScale(10),
+  },
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: scale(20),
+    paddingVertical: verticalScale(10),
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: scale(20),
+  },
+  input: {
+    flex: 1,
+    height: verticalScale(40),
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: scale(20),
+    paddingHorizontal: scale(15),
+    color: "#fff",
+    marginRight: scale(10),
+  },
+  sendButton: {
+    backgroundColor: "#4a0e4e",
+    paddingHorizontal: scale(15),
+    paddingVertical: verticalScale(10),
+    borderRadius: scale(20),
+  },
+  sendButtonText: {
+    color: "#fff",
+    fontSize: scale(16),
+  },
+  controlsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: scale(300),
+    paddingHorizontal: scale(30),
+    marginTop: verticalScale(20),
   },
 });
