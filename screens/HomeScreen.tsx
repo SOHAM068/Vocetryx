@@ -27,6 +27,7 @@ import * as FileSystem from "expo-file-system";
 // Make sure you have these SVG components
 import Regenerate from "@/assets/svgs/regenerate";
 import Reload from "@/assets/svgs/reload";
+import AnimatedMicInterface from "@/components/AnimatedMicInterface";
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_API_KEY;
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
@@ -579,52 +580,25 @@ export default function HomeScreen() {
         <View style={styles.contentContainer}>
           <View style={styles.animationContainer}>
             {loading ? (
-              <TouchableOpacity>
-                <LottieView
-                  source={require("@/assets/animations/loading.json")}
-                  autoPlay
-                  loop
-                  speed={1.3}
-                  style={styles.loadingAnimation}
-                />
-              </TouchableOpacity>
+              <LottieView
+                source={require("@/assets/animations/loading.json")}
+                autoPlay
+                loop
+                speed={1.3}
+                style={styles.loadingAnimation}
+              />
             ) : (
               <>
-                {!isRecording ? (
-                  <>
-                    {AIResponse ? (
-                      <View>
-                        <LottieView
-                          ref={lottieRef}
-                          source={require("@/assets/animations/ai-speaking.json")}
-                          autoPlay={false}
-                          loop={false}
-                          style={styles.aiAnimation}
-                        />
-                      </View>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.micButton}
-                        onPress={startRecording}
-                      >
-                        <FontAwesome
-                          name="microphone"
-                          size={scale(50)}
-                          color="#2b3356"
-                        />
-                      </TouchableOpacity>
-                    )}
-                  </>
-                ) : (
-                  <TouchableOpacity onPress={stopRecording}>
+                {AISpeaking && (
+                  <View>
                     <LottieView
-                      source={require("@/assets/animations/animation.json")}
-                      autoPlay
-                      loop
-                      speed={1.3}
-                      style={styles.recordingAnimation}
+                      ref={lottieRef}
+                      source={require("@/assets/animations/ai-speaking.json")}
+                      autoPlay={false}
+                      loop={false}
+                      style={styles.aiAnimation}
                     />
-                  </TouchableOpacity>
+                  </View>
                 )}
               </>
             )}
@@ -655,37 +629,52 @@ export default function HomeScreen() {
             </ScrollView>
           </View>
 
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.input}
-              value={userInput}
-              onChangeText={setUserInput}
-              placeholder="Type your message..."
-              placeholderTextColor="#999"
-            />
-            <TouchableOpacity
-              style={styles.sendButton}
-              onPress={handleSendMessage}
-            >
-              <FontAwesome name="send" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
+          <View style={styles.bottomContainer}>
+            <View style={styles.inputControlsContainer}>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={userInput}
+                  onChangeText={setUserInput}
+                  placeholder="Type your message..."
+                  placeholderTextColor="#999"
+                />
+                <TouchableOpacity
+                  style={styles.sendButton}
+                  onPress={handleSendMessage}
+                >
+                  <FontAwesome name="send" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
 
-          {AIResponse && (
-            <View style={styles.controlsContainer}>
-              <TouchableOpacity onPress={() => sendToGemini(text)}>
-                <Regenerate />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  Speech.stop();
-                  speakText(text);
-                }}
-              >
-                <Reload />
-              </TouchableOpacity>
+              <View style={styles.micContainer}>
+                {isRecording ? (
+                  <TouchableOpacity
+                    style={styles.recordingButton}
+                    onPress={stopRecording}
+                  >
+                    <LottieView
+                      source={require("@/assets/animations/animation.json")}
+                      autoPlay
+                      speed={1.3}
+                      style={styles.recordingAnimation}
+                    />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.micButton}
+                    onPress={startRecording}
+                  >
+                    <FontAwesome
+                      name="microphone"
+                      size={scale(35)}
+                      color="#2b3356"
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
-          )}
+          </View>
         </View>
       </LinearGradient>
     </KeyboardAvoidingView>
@@ -720,11 +709,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingTop: verticalScale(100),
-    paddingBottom: verticalScale(30),
   },
   animationContainer: {
     alignItems: "center",
-    marginTop: verticalScale(20),
+    height: verticalScale(200),
+    justifyContent: "center",
   },
   loadingAnimation: {
     width: scale(270),
@@ -734,24 +723,10 @@ const styles = StyleSheet.create({
     width: scale(250),
     height: scale(250),
   },
-  micButton: {
-    width: scale(110),
-    height: scale(110),
-    backgroundColor: "#fff",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: scale(100),
-  },
-  recordingAnimation: {
-    width: scale(250),
-    height: scale(250),
-  },
   textContainer: {
     flex: 1,
     width: "100%",
     paddingHorizontal: scale(20),
-    marginTop: verticalScale(-30),
   },
   scrollView: {
     flex: 1,
@@ -759,7 +734,7 @@ const styles = StyleSheet.create({
   },
   scrollViewContent: {
     flexGrow: 1,
-    // paddingVertical: verticalScale(10),
+    paddingBottom: verticalScale(20),
   },
   messageContainer: {
     borderRadius: scale(15),
@@ -785,32 +760,65 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: verticalScale(10),
   },
-  inputContainer: {
+  bottomContainer: {
+    width: "100%",
+    paddingBottom: verticalScale(30),
+  },
+  inputControlsContainer: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: scale(20),
     paddingVertical: verticalScale(10),
+    width: "100%",
+    justifyContent: "space-between",
+  },
+  inputContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "rgba(255, 255, 255, 0.08)",
     borderRadius: scale(20),
+    paddingHorizontal: scale(15),
+    marginRight: scale(10),
+    height: verticalScale(50),
   },
   input: {
     flex: 1,
-    height: verticalScale(40),
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderRadius: scale(20),
-    paddingHorizontal: scale(15),
     color: "#fff",
-    marginRight: scale(10),
+    fontSize: scale(16),
+  },
+  micContainer: {
+    width: scale(50),
+    height: scale(50),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  micButton: {
+    width: scale(50),
+    height: scale(50),
+    backgroundColor: "#fff",
+    borderRadius: scale(25),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recordingButton: {
+    width: scale(50),
+    height: scale(50),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recordingAnimation: {
+    width: scale(80),
+    height: scale(80),
+    marginTop: verticalScale(-15),
   },
   sendButton: {
     backgroundColor: "#4a0e4e",
-    paddingHorizontal: scale(15),
-    paddingVertical: verticalScale(10),
+    width: scale(40),
+    height: scale(40),
     borderRadius: scale(20),
-  },
-  sendButtonText: {
-    color: "#fff",
-    fontSize: scale(16),
+    alignItems: "center",
+    justifyContent: "center",
   },
   controlsContainer: {
     flexDirection: "row",
@@ -819,5 +827,6 @@ const styles = StyleSheet.create({
     width: scale(300),
     paddingHorizontal: scale(30),
     marginTop: verticalScale(20),
+    alignSelf: "center",
   },
 });
