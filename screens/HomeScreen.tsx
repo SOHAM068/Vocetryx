@@ -29,6 +29,7 @@ import * as FileSystem from "expo-file-system";
 // Make sure you have these SVG components
 import Regenerate from "@/assets/svgs/regenerate";
 import Reload from "@/assets/svgs/reload";
+import { Volume2, VolumeX } from "lucide-react-native";
 import AnimatedMicInterface from "@/components/AnimatedMicInterface";
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_API_KEY;
@@ -470,11 +471,17 @@ export default function HomeScreen() {
     };
   }, []);
 
+  const [isMuted, setIsMuted] = useState(false);
+
   // Modified speakText function with male voice selection
   const speakText = async (text: string) => {
     try {
       // Stop any ongoing speech first
       await Speech.stop();
+
+      if (isMuted) {
+        return; // Don't speak if muted
+      }
 
       setAISpeaking(true);
 
@@ -521,6 +528,14 @@ export default function HomeScreen() {
       setAISpeaking(false);
       Alert.alert("Error", "Failed to initialize speech");
     }
+  };
+
+  const handleToggleMute = () => {
+    if (!isMuted) {
+      Speech.stop(); // Stop current speech when muting
+      setAISpeaking(false);
+    }
+    setIsMuted(!isMuted);
   };
 
   const handleSendMessage = async () => {
@@ -621,12 +636,32 @@ export default function HomeScreen() {
         <View style={styles.contentContainer}>
           {/* Centered Initial Mic Button */}
           {!showInput && (
-            <TouchableOpacity
-              style={styles.initialMicButton}
-              onPress={handleInitialMicPress}
-            >
-              <FontAwesome name="microphone" size={scale(40)} color="#2b3356" />
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={styles.initialMicButton}
+                onPress={handleInitialMicPress}
+              >
+                <FontAwesome
+                  name="microphone"
+                  size={scale(40)}
+                  color="#2b3356"
+                />
+              </TouchableOpacity>
+              <Text
+                style={{
+                  color: "#fff",
+                  fontSize: scale(16),
+                  width: scale(269),
+                  textAlign: "center",
+                  lineHeight: 25,
+                  marginTop: scale(400), // Added margin to position text below the icon
+                }}
+              >
+                {loading
+                  ? "..."
+                  : text || "Press the microphone to start recording!"}
+              </Text>
+            </>
           )}
 
           {/* Chat Content */}
@@ -648,8 +683,8 @@ export default function HomeScreen() {
                         <LottieView
                           ref={lottieRef}
                           source={require("@/assets/animations/ai-speaking.json")}
-                          autoPlay={false}
-                          loop={false}
+                          autoPlay
+                          loop={true}
                           style={styles.aiAnimation}
                         />
                       </View>
@@ -683,11 +718,8 @@ export default function HomeScreen() {
                 </ScrollView>
               </View>
 
-              <Animated.View 
-                style={[
-                  styles.bottomContainer,
-                  { opacity: inputOpacity }
-                ]}
+              <Animated.View
+                style={[styles.bottomContainer, { opacity: inputOpacity }]}
               >
                 <View style={styles.inputControlsContainer}>
                   <View style={styles.inputContainer}>
@@ -747,11 +779,18 @@ export default function HomeScreen() {
                 justifyContent: "flex-end",
                 alignItems: "center",
                 width: scale(360),
-                gap: 10
+                gap: 10,
               }}
             >
               <TouchableOpacity onPress={() => sendToGemini(text)}>
                 <Regenerate />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleToggleMute}>
+                {isMuted ? (
+                  <VolumeX size={40} color="#fff" />
+                ) : (
+                  <Volume2 size={40} color="#fff" strokeWidth={2} />
+                )}
               </TouchableOpacity>
               <TouchableOpacity onPress={() => speakText(text)}>
                 <Reload />
@@ -794,10 +833,10 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -scale(55) }, { translateY: -scale(100) }],
     width: scale(120),
     height: scale(120),
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: scale(95),
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
@@ -805,14 +844,14 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-    elevation: 5
+    elevation: 5,
   },
   contentContainer: {
     flex: 1,
     justifyContent: "space-between",
     alignItems: "center",
     paddingTop: verticalScale(20), // Reduced top padding
-    width: '100%',
+    width: "100%",
   },
   animationContainer: {
     alignItems: "center",
@@ -837,7 +876,7 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
     width: "100%",
-    backgroundColor: 'rgba(255, 255, 255, 0.05)', // Added subtle background
+    backgroundColor: "rgba(255, 255, 255, 0.05)", // Added subtle background
     borderRadius: scale(20), // Added border radius
     padding: scale(10), // Added padding
   },
@@ -875,7 +914,7 @@ const styles = StyleSheet.create({
   bottomContainer: {
     width: "100%",
     paddingBottom: verticalScale(30),
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
   },
   inputControlsContainer: {
     flexDirection: "row",
