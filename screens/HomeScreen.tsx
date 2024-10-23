@@ -12,6 +12,8 @@ import {
   ScrollView,
   TextInput,
   KeyboardAvoidingView,
+  Animated,
+  Dimensions,
 } from "react-native";
 import React, { useEffect, useRef, useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
@@ -539,6 +541,40 @@ export default function HomeScreen() {
     }
   };
 
+  const { width, height } = Dimensions.get("window");
+
+  const [showInput, setShowInput] = useState(false);
+  const micPosition = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const micScale = useRef(new Animated.Value(1)).current;
+  const inputOpacity = useRef(new Animated.Value(0)).current;
+
+  const animateMicToCorner = () => {
+    setShowInput(true);
+    Animated.parallel([
+      Animated.spring(micPosition, {
+        toValue: {
+          x: width / 2 - scale(85), // Adjust based on your layout
+          y: height / 2 - verticalScale(200), // Adjust based on your layout
+        },
+        useNativeDriver: true,
+      }),
+      Animated.spring(micScale, {
+        toValue: 0.7,
+        useNativeDriver: true,
+      }),
+      Animated.timing(inputOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const handleInitialMicPress = () => {
+    animateMicToCorner();
+    startRecording();
+  };
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -550,7 +586,7 @@ export default function HomeScreen() {
         end={{ x: 1, y: 1 }}
         style={styles.container}
       >
-        <StatusBar barStyle={"light-content"} />
+        <StatusBar barStyle="light-content" />
 
         <Image
           source={require("@/assets/main/blur.png")}
@@ -571,6 +607,11 @@ export default function HomeScreen() {
               setText("");
               setAISpeaking(false);
               setChatHistory([]);
+              setShowInput(false);
+              // Reset animations
+              micPosition.setValue({ x: 0, y: 0 });
+              micScale.setValue(1);
+              inputOpacity.setValue(0);
             }}
           >
             <AntDesign name="arrowleft" size={scale(20)} color="#fff" />
@@ -578,103 +619,145 @@ export default function HomeScreen() {
         )}
 
         <View style={styles.contentContainer}>
-          <View style={styles.animationContainer}>
-            {loading ? (
-              <LottieView
-                source={require("@/assets/animations/loading.json")}
-                autoPlay
-                loop
-                speed={1.3}
-                style={styles.loadingAnimation}
-              />
-            ) : (
-              <>
-                {AISpeaking && (
-                  <View>
-                    <LottieView
-                      ref={lottieRef}
-                      source={require("@/assets/animations/ai-speaking.json")}
-                      autoPlay={false}
-                      loop={false}
-                      style={styles.aiAnimation}
-                    />
-                  </View>
-                )}
-              </>
-            )}
-          </View>
-
-          <View style={styles.textContainer}>
-            <ScrollView
-              style={styles.scrollView}
-              contentContainerStyle={styles.scrollViewContent}
-              showsVerticalScrollIndicator={false}
+          {/* Centered Initial Mic Button */}
+          {!showInput && (
+            <TouchableOpacity
+              style={styles.initialMicButton}
+              onPress={handleInitialMicPress}
             >
-              {chatHistory.map((message, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.messageContainer,
-                    message.role === "user"
-                      ? styles.userMessage
-                      : styles.aiMessage,
-                  ]}
-                >
-                  <Text style={styles.messageText}>{message.content}</Text>
-                </View>
-              ))}
-              {loading && (
-                <Text style={styles.loadingText}>AI is thinking...</Text>
-              )}
-            </ScrollView>
-          </View>
+              <FontAwesome name="microphone" size={scale(40)} color="#2b3356" />
+            </TouchableOpacity>
+          )}
 
-          <View style={styles.bottomContainer}>
-            <View style={styles.inputControlsContainer}>
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.input}
-                  value={userInput}
-                  onChangeText={setUserInput}
-                  placeholder="Type your message..."
-                  placeholderTextColor="#999"
-                />
-                <TouchableOpacity
-                  style={styles.sendButton}
-                  onPress={handleSendMessage}
-                >
-                  <FontAwesome name="send" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.micContainer}>
-                {isRecording ? (
-                  <TouchableOpacity
-                    style={styles.recordingButton}
-                    onPress={stopRecording}
-                  >
-                    <LottieView
-                      source={require("@/assets/animations/animation.json")}
-                      autoPlay
-                      speed={1.3}
-                      style={styles.recordingAnimation}
-                    />
-                  </TouchableOpacity>
+          {/* Chat Content */}
+          {showInput && (
+            <>
+              <View style={styles.animationContainer}>
+                {loading ? (
+                  <LottieView
+                    source={require("@/assets/animations/loading.json")}
+                    autoPlay
+                    loop
+                    speed={1.3}
+                    style={styles.loadingAnimation}
+                  />
                 ) : (
-                  <TouchableOpacity
-                    style={styles.micButton}
-                    onPress={startRecording}
-                  >
-                    <FontAwesome
-                      name="microphone"
-                      size={scale(35)}
-                      color="#2b3356"
-                    />
-                  </TouchableOpacity>
+                  <>
+                    {AISpeaking && (
+                      <View>
+                        <LottieView
+                          ref={lottieRef}
+                          source={require("@/assets/animations/ai-speaking.json")}
+                          autoPlay={false}
+                          loop={false}
+                          style={styles.aiAnimation}
+                        />
+                      </View>
+                    )}
+                  </>
                 )}
               </View>
+
+              <View style={styles.textContainer}>
+                <ScrollView
+                  style={styles.scrollView}
+                  contentContainerStyle={styles.scrollViewContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {chatHistory.map((message, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.messageContainer,
+                        message.role === "user"
+                          ? styles.userMessage
+                          : styles.aiMessage,
+                      ]}
+                    >
+                      <Text style={styles.messageText}>{message.content}</Text>
+                    </View>
+                  ))}
+                  {loading && (
+                    <Text style={styles.loadingText}>AI is thinking...</Text>
+                  )}
+                </ScrollView>
+              </View>
+
+              <Animated.View 
+                style={[
+                  styles.bottomContainer,
+                  { opacity: inputOpacity }
+                ]}
+              >
+                <View style={styles.inputControlsContainer}>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={userInput}
+                      onChangeText={setUserInput}
+                      placeholder="Type your message..."
+                      placeholderTextColor="#999"
+                    />
+                    <TouchableOpacity
+                      style={styles.sendButton}
+                      onPress={handleSendMessage}
+                    >
+                      <FontAwesome name="send" size={20} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.micContainer}>
+                    {isRecording ? (
+                      <TouchableOpacity
+                        style={styles.recordingButton}
+                        onPress={stopRecording}
+                      >
+                        <LottieView
+                          source={require("@/assets/animations/animation.json")}
+                          autoPlay
+                          speed={1.3}
+                          style={styles.recordingAnimation}
+                        />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.micButton}
+                        onPress={startRecording}
+                      >
+                        <FontAwesome
+                          name="microphone"
+                          size={scale(35)}
+                          color="#2b3356"
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              </Animated.View>
+            </>
+          )}
+          {AIResponse && (
+            <View
+              style={{
+                position: "absolute",
+                top: verticalScale(48),
+                left: 0,
+                paddingHorizontal: scale(30),
+                flexDirection: "row",
+                justifyContent: "flex-end",
+                alignItems: "center",
+                width: scale(360),
+                gap: 10
+              }}
+            >
+              <TouchableOpacity onPress={() => sendToGemini(text)}>
+                <Regenerate />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => speakText(text)}>
+                <Reload />
+              </TouchableOpacity>
             </View>
-          </View>
+          )}
         </View>
       </LinearGradient>
     </KeyboardAvoidingView>
@@ -704,33 +787,59 @@ const styles = StyleSheet.create({
     left: scale(20),
     zIndex: 1,
   },
+  initialMicButton: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    transform: [{ translateX: -scale(55) }, { translateY: -scale(100) }],
+    width: scale(120),
+    height: scale(120),
+    backgroundColor: '#fff',
+    borderRadius: scale(95),
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5
+  },
   contentContainer: {
     flex: 1,
     justifyContent: "space-between",
     alignItems: "center",
-    paddingTop: verticalScale(100),
+    paddingTop: verticalScale(20), // Reduced top padding
+    width: '100%',
   },
   animationContainer: {
     alignItems: "center",
-    height: verticalScale(200),
+    height: verticalScale(150), // Reduced height
     justifyContent: "center",
   },
   loadingAnimation: {
-    width: scale(270),
-    height: scale(270),
+    width: scale(200),
+    height: scale(200),
   },
   aiAnimation: {
-    width: scale(250),
-    height: scale(250),
+    width: scale(200),
+    height: scale(200),
   },
   textContainer: {
     flex: 1,
     width: "100%",
-    paddingHorizontal: scale(20),
+    paddingHorizontal: scale(15),
+    marginTop: verticalScale(10), // Added margin top
+    marginBottom: verticalScale(10), // Added margin bottom
   },
   scrollView: {
     flex: 1,
     width: "100%",
+    backgroundColor: 'rgba(255, 255, 255, 0.05)', // Added subtle background
+    borderRadius: scale(20), // Added border radius
+    padding: scale(10), // Added padding
   },
   scrollViewContent: {
     flexGrow: 1,
@@ -738,21 +847,24 @@ const styles = StyleSheet.create({
   },
   messageContainer: {
     borderRadius: scale(15),
-    padding: scale(10),
-    marginBottom: verticalScale(10),
-    maxWidth: "80%",
+    padding: scale(15), // Increased padding
+    marginBottom: verticalScale(12), // Increased margin
+    maxWidth: "90%", // Increased maximum width
   },
   userMessage: {
     alignSelf: "flex-end",
     backgroundColor: "#4a0e4e",
+    borderBottomRightRadius: scale(5), // Added chat bubble style
   },
   aiMessage: {
     alignSelf: "flex-start",
     backgroundColor: "#2b3356",
+    borderBottomLeftRadius: scale(5), // Added chat bubble style
   },
   messageText: {
     color: "#fff",
     fontSize: scale(16),
+    lineHeight: scale(24), // Added line height for better readability
   },
   loadingText: {
     color: "#999",
@@ -763,6 +875,7 @@ const styles = StyleSheet.create({
   bottomContainer: {
     width: "100%",
     paddingBottom: verticalScale(30),
+    backgroundColor: 'transparent',
   },
   inputControlsContainer: {
     flexDirection: "row",
@@ -800,6 +913,14 @@ const styles = StyleSheet.create({
     borderRadius: scale(25),
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   recordingButton: {
     width: scale(50),
@@ -819,14 +940,5 @@ const styles = StyleSheet.create({
     borderRadius: scale(20),
     alignItems: "center",
     justifyContent: "center",
-  },
-  controlsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    width: scale(300),
-    paddingHorizontal: scale(30),
-    marginTop: verticalScale(20),
-    alignSelf: "center",
   },
 });
