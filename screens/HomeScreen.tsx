@@ -806,7 +806,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#131313",
+    backgroundColor: "#131312",
   },
   topBlur: {
     position: "absolute",
