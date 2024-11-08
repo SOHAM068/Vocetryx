@@ -843,7 +843,7 @@ const styles = StyleSheet.create({
       height: 2,
     },
     shadowOpacity: 0.26,
-    shadowRadius: 3.84,
+    shadowRadius: 3.85,
     elevation: 5,
   },
   contentContainer: {
