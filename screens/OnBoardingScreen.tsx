@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     borderRadius: scale(30),
     marginTop: verticalScale(25),
     shadowColor: "#6C63FF",
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 9 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 5,
