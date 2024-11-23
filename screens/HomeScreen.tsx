@@ -898,7 +898,7 @@ const styles = StyleSheet.create({
   aiMessage: {
     alignSelf: "flex-start",
     backgroundColor: "#2b3356",
-    borderBottomLeftRadius: scale(5), // Added chat bubble style
+    borderBottomLeftRadius: scale(6), // Added chat bubble style
   },
   messageText: {
     color: "#fff",
