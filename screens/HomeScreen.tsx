@@ -974,8 +974,8 @@ const styles = StyleSheet.create({
   },
   sendButton: {
     backgroundColor: "#4a0e4e",
-    width: scale(40),
-    height: scale(40),
+    width: scale(41),
+    height: scale(41),
     borderRadius: scale(20),
     alignItems: "center",
     justifyContent: "center",
